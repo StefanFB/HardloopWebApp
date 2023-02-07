@@ -19,9 +19,8 @@ if not os.environ.get("API_KEY"):
 """
 
 @app.route("/")
-@login_required
 def index():
-    return error("This page (index) has not yet been created", 404)
+    return render_template("index.html")
 
 @app.route("/add")
 @login_required
@@ -31,6 +30,11 @@ def add():
 @app.route("/login")
 def login():
     return error("This page (login) has not yet been created", 404)
+
+@app.route("/overview")
+@login_required
+def overview():
+    return error("This page (overview) has not yet been created", 404)
 
 @app.route("/register")
 def register():
