@@ -1,11 +1,13 @@
 import os
 import requests
+import sqlite3
 import urllib.parse
 
 from flask import Flask, flash, redirect, render_template, request, session
 from flask_session import Session
 from tempfile import mkdtemp
 from werkzeug.security import check_password_hash, generate_password_hash
+from sqlalchemy import create_engine, select, text
 
 from helpers import login_required, error
 
@@ -21,6 +23,7 @@ if not os.environ.get("API_KEY"):
 # TO-DO: Initialize database as db with SQLAlchemy
 # The db is used as shorthand to access the database
 # Old code: db = SQL("sqlite:///finance.db")
+db = create_engine("sqlite:///users.db")
 
 # Configure session to use filesystem (instead of signed cookies)
 app.config["SESSION_PERMANENT"] = False
@@ -46,18 +49,18 @@ def login():
 
         # Ensure username was submitted
         if not request.form.get("username"):
-            return apology("must provide username", 403)
+            return error("must provide username", 403)
 
         # Ensure password was submitted
         elif not request.form.get("password"):
-            return apology("must provide password", 403)
+            return error("must provide password", 403)
 
         # Query database for username
         rows = db.execute("SELECT * FROM users WHERE username = ?", request.form.get("username"))
 
         # Ensure username exists and password is correct
         if len(rows) != 1 or not check_password_hash(rows[0]["hash"], request.form.get("password")):
-            return apology("invalid username and/or password", 403)
+            return error("invalid username and/or password", 403)
 
         # Remember which user has logged in
         session["user_id"] = rows[0]["id"]
@@ -92,28 +95,37 @@ def register():
         password = str(request.form.get("password"))
         passcheck = str(request.form.get("confirmation"))
 
-        # Get list of usernames
-        usernames = db.execute("SELECT username FROM users")
-
+        # Get list of usernames (seems unnecessary, but won´t delete it yet)
+        # usernames = db.execute("SELECT username FROM users")
+        with db.connect() as conn:
+            usernames = conn.execute(text("SELECT username FROM users"))
+        
         if username == "":
-            return apology("no username")
+            return error("no username", 400)
 
-        name_check = db.execute("SELECT username FROM users WHERE username = ?", username)
-        if len(name_check) != 0 and name_check[0]["username"] == username:
-            return apology("username is already taken")
+        # check for existing username
+        with db.connect() as conn:
+            name_check = conn.execute(text("SELECT username FROM users WHERE username = :a"), {"a": username})
+        #name_check = db.execute("SELECT username FROM users WHERE username = ?", username)
+            if len(list(name_check)) != 0 and name_check[0]["username"] == username:
+                return error("username is already taken", 400)
 
         if password == "":
-            return apology("no password")
+            return error("no password", 400)
 
         if password != passcheck:
-            return apology("passwords don't match")
+            return error("passwords don't match", 400)
 
         # Hash password and register user
         passhash = generate_password_hash(password)
-        db.execute("INSERT INTO users (username, hash) VALUES (?, ?)", username, passhash)
+        with db.connect() as conn:
+            conn.execute(text("INSERT INTO users (username, hash) VALUES (:a, :b)"), {"a": username, "b": passhash})
+        # db.execute("INSERT INTO users (username, hash) VALUES (?, ?)", username, passhash)
 
         # Treat the new user as being logged in
-        userid_table = db.execute("SELECT id FROM users WHERE username = ?", username)
+        with db.connect() as conn:
+            conn.execute(text("SELECT id FROM users WHERE username = :a"), {"a": username})
+        #userid_table = db.execute("SELECT id FROM users WHERE username = ?", username)
         session["user_id"] = userid_table[0]["id"]
 
         flash("You have been registered!")

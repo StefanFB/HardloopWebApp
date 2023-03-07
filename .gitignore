@@ -1,3 +1,6 @@
 __pycache__
 flask_session
 venv
+test.db
+users.db
+.vscode
