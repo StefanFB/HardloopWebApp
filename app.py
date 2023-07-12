@@ -2,12 +2,14 @@ import os
 import requests
 import sqlite3
 import urllib.parse
+import models
 
 from flask import Flask, flash, redirect, render_template, request, session
 from flask_session import Session
 from tempfile import mkdtemp
 from werkzeug.security import check_password_hash, generate_password_hash
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, select, text, ForeignKey, String, Time
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from helpers import login_required, error
 
@@ -20,16 +22,27 @@ if not os.environ.get("API_KEY"):
     raise RuntimeError("API_KEY not set")
 """
 
-# TO-DO: Initialize database as db with SQLAlchemy
+# Create classes for each table in database
+class Base(DeclarativeBase):
+    pass
+
+class user(Base):
+    __tablename__ = "user"
+
+    id: Mapped[int] = mapped_column(primary_key=True,autoincrement=True)
+    name: Mapped[str] = mapped_column(String)
+    password: Mapped[str] = mapped_column(String)
+
 # The db is used as shorthand to access the database
-# Old code: db = SQL("sqlite:///finance.db")
-db = create_engine("sqlite:///users.db")
+db = create_engine("sqlite:///users.db", echo=True)
+Base.metadata.create_all(db)
 
 # Configure session to use filesystem (instead of signed cookies)
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_TYPE"] = "filesystem"
 Session(app)
 
+# Configuration of each route
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -95,41 +108,65 @@ def register():
         password = str(request.form.get("password"))
         passcheck = str(request.form.get("confirmation"))
 
-        # Get list of usernames (seems unnecessary, but won´t delete it yet)
-        # usernames = db.execute("SELECT username FROM users")
+        # Retrieve username from db, duplicates not allowed
         with db.connect() as conn:
-            usernames = conn.execute(text("SELECT username FROM users"))
+            # Execute query with .all() to select (hopefully) one row from the database
+            name_check = conn.execute(text("SELECT username FROM users WHERE username = :a"), {"a": username}).all()
+            # Go into the object selecting the first tuple, then the first entry
+            existing_user = name_check[0][0]
         
         if username == "":
-            return error("no username", 400)
+            flash("No username provided", error)
+            # return redirect("/register")
 
-        # check for existing username
-        with db.connect() as conn:
-            name_check = conn.execute(text("SELECT username FROM users WHERE username = :a"), {"a": username})
-        #name_check = db.execute("SELECT username FROM users WHERE username = ?", username)
-            if len(list(name_check)) != 0 and name_check[0]["username"] == username:
-                return error("username is already taken", 400)
+        elif password == "":
+            flash("No password provided", error)
+            # return redirect("/register")
 
-        if password == "":
-            return error("no password", 400)
+        elif password != passcheck:
+            flash("Passwords don't match", error)
+            # return redirect("/register")
 
-        if password != passcheck:
-            return error("passwords don't match", 400)
+        # Check for existing username
+        elif existing_user == username:
+            flash("username is already taken", error)
+            # return redirect("/register")
 
-        # Hash password and register user
-        passhash = generate_password_hash(password)
-        with db.connect() as conn:
-            conn.execute(text("INSERT INTO users (username, hash) VALUES (:a, :b)"), {"a": username, "b": passhash})
-        # db.execute("INSERT INTO users (username, hash) VALUES (?, ?)", username, passhash)
+        else:
+            # Hash password
+            passhash = generate_password_hash(password)
 
-        # Treat the new user as being logged in
-        with db.connect() as conn:
-            conn.execute(text("SELECT id FROM users WHERE username = :a"), {"a": username})
-        #userid_table = db.execute("SELECT id FROM users WHERE username = ?", username)
-        session["user_id"] = userid_table[0]["id"]
+            # Register user by adding to db
+            with Session(db) as session:
 
-        flash("You have been registered!")
-        return redirect("/")
+                # Create new user
+                newUser = user(
+                    name = username,
+                    password = passhash
+                )
+
+                ## Add user, then commit
+                session.add_all(newUser)
+                session.commit
+                
+            with db.connect() as conn:
+                conn.execute(text("INSERT INTO users (username, password) VALUES (:a, :b)"), {"a": username, "b": passhash})
+            # db.execute("INSERT INTO users (username, hash) VALUES (?, ?)", username, passhash)
+
+            # Treat the new user as being logged in
+            with db.connect() as conn:
+                userid_table = conn.execute(text("SELECT id FROM users WHERE username = :a"), {"a": username})
+
+            #userid_table = db.execute("SELECT id FROM users WHERE username = ?", username)
+            print("test: " + str(userid_table))
+            print(list(userid_table))
+            session["user_id"] = userid_table[0]["id"]
+
+            flash("You have been registered!")
+            return redirect("/")
+        
+        # When checks are not passed, return to empty register-form
+        return redirect("/register")
 
     else:
         return render_template("register.html")
