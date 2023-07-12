@@ -112,8 +112,13 @@ def register():
         with db.connect() as conn:
             # Execute query with .all() to select (hopefully) one row from the database
             name_check = conn.execute(text("SELECT username FROM users WHERE username = :a"), {"a": username}).all()
-            # Go into the object selecting the first tuple, then the first entry
-            existing_user = name_check[0][0]
+            
+            # Check length of returned list, if item exists: set existing_user to inputted name; else: set to empty string
+            if len(name_check) != 0:
+                # Go into the object selecting the first tuple, then the first entry
+                existing_user = name_check[0][0]
+            else:
+                existing_user = ""
         
         if username == "":
             flash("No username provided", error)
@@ -129,7 +134,7 @@ def register():
 
         # Check for existing username
         elif existing_user == username:
-            flash("username is already taken", error)
+            flash("Username is already taken", error)
             # return redirect("/register")
 
         else:
